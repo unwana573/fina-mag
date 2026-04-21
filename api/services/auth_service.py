@@ -29,8 +29,22 @@ class AuthService:
 
     def login(self, body: LoginRequest) -> TokenResponse:
         user = self.user_repo.get_by_email(body.email)
-        if not user or not verify_password(body.password, user.hashed_password):
+
+        # User doesn't exist
+        if not user:
             raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        # User registered via Google/Apple — has no password
+        if not user.hashed_password:
+            raise HTTPException(
+                status_code=401,
+                detail="This account uses Google or Apple sign-in. Please use that instead."
+            )
+
+        # Wrong password
+        if not verify_password(body.password, user.hashed_password):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
         if not user.is_active:
             raise HTTPException(status_code=403, detail="Account disabled")
 
@@ -62,6 +76,13 @@ class AuthService:
             import pyotp
         except ImportError:
             raise HTTPException(status_code=501, detail="Install pyotp: pip install pyotp")
+
+        # OAuth users need a password to use 2FA
+        if not user.hashed_password:
+            raise HTTPException(
+                status_code=400,
+                detail="Set a password on your account before enabling 2FA."
+            )
 
         from api.core.config import settings
         secret = pyotp.random_base32()

@@ -35,11 +35,37 @@ def change_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not current_user.hashed_password:
+        raise HTTPException(
+            status_code=400,
+            detail="This account uses Google or Apple sign-in and has no password. "
+                   "Use /users/me/set-password to add one."
+        )
     if not verify_password(body.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     current_user.hashed_password = hash_password(body.new_password)
     db.commit()
     return {"detail": "Password updated successfully"}
+
+
+@router.post("/me/set-password", status_code=200)
+def set_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Allows OAuth users (Google/Apple) to add a password to their account
+    so they can also log in with email + password.
+    """
+    if current_user.hashed_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Account already has a password. Use /users/me/password to change it."
+        )
+    current_user.hashed_password = hash_password(body.new_password)
+    db.commit()
+    return {"detail": "Password set successfully"}
 
 
 @router.delete("/me", status_code=204)
