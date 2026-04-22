@@ -3,12 +3,15 @@ from sqlalchemy import create_engine, pool
 from alembic import context
 import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from api.models import Base
 from api.core.config import settings
 from api.core.database import Base
 import api.models
+
+target_metadata = Base.metadata
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 config = context.config
 
