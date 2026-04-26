@@ -4,7 +4,7 @@ from api.repositories.user_repo import UserRepository
 from api.repositories.refresh_token_repo import RefreshTokenRepository
 from api.core.security import create_access_token
 from api.schemas.auth import TokenResponse
-
+from fastapi import HTTPException
 
 class OAuthService:
     def __init__(self, db: Session):
@@ -62,7 +62,7 @@ class OAuthService:
             user = self._create_oauth_user(email, full_name, provider, provider_id, avatar_url)
 
         if not user.is_active:
-            from fastapi import HTTPException
+            
             raise HTTPException(status_code=403, detail="Account disabled")
 
         token = self.token_repo.create_for_user(user.id)
