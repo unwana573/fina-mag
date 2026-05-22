@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from api.repositories.transaction_repo import TransactionRepository
+from api.core.audit import log
 from api.models import TransactionType
 from api.schemas.transaction import TransactionCreate, TransactionUpdate, PaginatedTransactions
 
@@ -10,6 +11,7 @@ from api.schemas.transaction import TransactionCreate, TransactionUpdate, Pagina
 class TransactionService:
     def __init__(self, db: Session):
         self.repo = TransactionRepository(db)
+        self.db = db
 
     def list(
         self,
@@ -31,7 +33,11 @@ class TransactionService:
         data["user_id"] = user_id
         if not data.get("date"):
             data["date"] = datetime.utcnow()
-        return self.repo.create(data)
+        txn = self.repo.create(data)
+        log(self.db, action="transaction.created", user_id=user_id,
+            entity="transaction", entity_id=txn.id,
+            detail=f"amount={txn.amount} type={txn.type}")
+        return txn
 
     def get(self, user_id: int, transaction_id: int):
         txn = self.repo.get_user_transaction(user_id, transaction_id)
@@ -42,10 +48,16 @@ class TransactionService:
     def update(self, user_id: int, transaction_id: int, body: TransactionUpdate):
         txn = self.get(user_id, transaction_id)
         data = {k: v for k, v in body.model_dump().items() if v is not None}
-        return self.repo.update(txn, data)
+        updated = self.repo.update(txn, data)
+        log(self.db, action="transaction.updated", user_id=user_id,
+            entity="transaction", entity_id=transaction_id)
+        return updated
 
     def delete(self, user_id: int, transaction_id: int) -> None:
         txn = self.get(user_id, transaction_id)
+        log(self.db, action="transaction.deleted", user_id=user_id,
+            entity="transaction", entity_id=transaction_id,
+            detail=f"amount={txn.amount} type={txn.type}")
         self.repo.delete(txn)
 
     def export_csv(self, user_id: int) -> str:
@@ -56,4 +68,5 @@ class TransactionService:
         writer.writerow(["id", "date", "description", "type", "category_id", "amount"])
         for t in items:
             writer.writerow([t.id, t.date, t.description, t.type, t.category_id, t.amount])
+        log(self.db, action="transaction.exported", user_id=user_id)
         return output.getvalue()

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from api.core.database import get_db
 from api.core.dependencies import get_current_user
 from api.core.security import verify_password, hash_password
+from api.core.audit import log
 from api.models import User
 from api.schemas.user import UserResponse, UpdateUserRequest, ChangePasswordRequest
 
@@ -26,6 +27,7 @@ def update_me(
         current_user.currency = body.currency
     db.commit()
     db.refresh(current_user)
+    log(db, action="user.profile_updated", user_id=current_user.id)
     return current_user
 
 
@@ -45,6 +47,7 @@ def change_password(
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     current_user.hashed_password = hash_password(body.new_password)
     db.commit()
+    log(db, action="user.password_changed", user_id=current_user.id)
     return {"detail": "Password updated successfully"}
 
 
@@ -54,10 +57,6 @@ def set_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Allows OAuth users (Google/Apple) to add a password to their account
-    so they can also log in with email + password.
-    """
     if current_user.hashed_password:
         raise HTTPException(
             status_code=400,
@@ -65,6 +64,7 @@ def set_password(
         )
     current_user.hashed_password = hash_password(body.new_password)
     db.commit()
+    log(db, action="user.password_set", user_id=current_user.id)
     return {"detail": "Password set successfully"}
 
 
@@ -73,5 +73,7 @@ def delete_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    log(db, action="user.deleted", user_id=current_user.id,
+        detail=f"email={current_user.email}")
     db.delete(current_user)
     db.commit()

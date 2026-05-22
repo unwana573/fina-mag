@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from api.core.database import get_db
 from api.core.dependencies import get_current_user
+from api.core.audit import log
 from api.models import User
 from api.schemas.budget import BudgetCreate, BudgetUpdate, BudgetResponse, BudgetSummaryResponse
 from api.services.budget_service import BudgetService
 
-router = APIRouter(prefix="/budget", tags=["Budget"])
+router = APIRouter(prefix="/budgets", tags=["Budgets"])
 
 
 @router.get("/summary", response_model=BudgetSummaryResponse)
@@ -14,12 +15,6 @@ def get_budget_summary(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Returns total budget, total spent, remaining, percent used
-    and full category breakdown with progress bar data.
-    Never returns 404 — safe to call on page load even for new users.
-    If budget_exists=False, prompt the user to create a budget.
-    """
     return BudgetService(db).get_summary(current_user.id)
 
 
@@ -28,7 +23,6 @@ def get_budget(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Returns full budget object for the current month. Returns 404 if not set."""
     return BudgetService(db).get_current(current_user.id)
 
 
@@ -39,7 +33,6 @@ def get_budget_by_month(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Returns budget for a specific month. Example: /budget/month?year=2026&month=3"""
     return BudgetService(db).get_by_month(current_user.id, year, month)
 
 
@@ -49,7 +42,11 @@ def create_budget(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return BudgetService(db).create(current_user.id, body)
+    budget = BudgetService(db).create(current_user.id, body)
+    log(db, action="budget.created", user_id=current_user.id,
+        entity="budget", entity_id=budget.id,
+        detail=f"month={body.month} year={body.year}")
+    return budget
 
 
 @router.put("/{budget_id}", response_model=BudgetResponse)
@@ -59,7 +56,26 @@ def update_budget(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return BudgetService(db).update(current_user.id, budget_id, body)
+    budget = BudgetService(db).update(current_user.id, budget_id, body)
+    log(db, action="budget.updated", user_id=current_user.id,
+        entity="budget", entity_id=budget_id)
+    return budget
+
+
+@router.delete("/{budget_id}", status_code=204)
+def delete_budget(
+    budget_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = BudgetService(db)
+    budget = service.budget_repo.get(budget_id)
+    if not budget or budget.user_id != current_user.id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Budget not found")
+    service.budget_repo.delete(budget)
+    log(db, action="budget.deleted", user_id=current_user.id,
+        entity="budget", entity_id=budget_id)
 
 
 @router.patch("/categories/{budget_id}/{category_id}")

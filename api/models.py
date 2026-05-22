@@ -63,9 +63,12 @@ class RefreshToken(Base):
 class Category(Base):
     __tablename__ = "categories"
 
-    id           = Column(Integer, primary_key=True, index=True)
-    name         = Column(String(100), unique=True, nullable=False)
-    created_at   = Column(DateTime, default=datetime.utcnow)
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String(100), nullable=False)
+    # user_id = NULL means global category (visible to all users)
+    # user_id = set means custom category (visible only to that user)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     transactions = relationship("Transaction", back_populates="category")
     budget_items = relationship("BudgetItem", back_populates="category")
@@ -81,7 +84,7 @@ class Transaction(Base):
     amount      = Column(Numeric(15, 2), nullable=False)
     type        = Column(Enum(TransactionType), nullable=False)
     reference   = Column(String(255), nullable=True, unique=True, index=True)
-    date        = Column(DateTime, default=datetime.utcnow)
+    date        = Column(DateTime, default=datetime.utcnow, index=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -134,8 +137,8 @@ class AuditLog(Base):
 
     id         = Column(Integer, primary_key=True, index=True)
     user_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    action     = Column(String(100), nullable=False)
+    action     = Column(String(100), nullable=False, index=True)
     entity     = Column(String(100), nullable=True)
     entity_id  = Column(Integer, nullable=True)
     detail     = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

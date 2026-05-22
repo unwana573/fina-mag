@@ -1,19 +1,21 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from api.core.config import settings
 from api.core.database import Base, engine
+from api.core.limiter import limiter
 from api.routers import (
     auth, users, transactions, budget,
     analytics, settings as settings_router,
-    webhooks, categories, oauth, seed,
+    webhooks, categories, oauth, seed, upload, audit,
 )
 
 Base.metadata.create_all(bind=engine)
 
-limiter = Limiter(key_func=get_remote_address)
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -33,16 +35,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/static/avatars", StaticFiles(directory=settings.UPLOAD_DIR), name="avatars")
+
 PREFIX = "/v1"
 app.include_router(auth.router,            prefix=PREFIX)
 app.include_router(oauth.router,           prefix=PREFIX)
 app.include_router(users.router,           prefix=PREFIX)
+app.include_router(upload.router,          prefix=PREFIX)
 app.include_router(transactions.router,    prefix=PREFIX)
 app.include_router(budget.router,          prefix=PREFIX)
 app.include_router(analytics.router,       prefix=PREFIX)
 app.include_router(settings_router.router, prefix=PREFIX)
 app.include_router(webhooks.router,        prefix=PREFIX)
 app.include_router(categories.router,      prefix=PREFIX)
+app.include_router(audit.router,           prefix=PREFIX)
 app.include_router(seed.router,            prefix=PREFIX)
 
 
