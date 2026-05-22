@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from api.repositories.budget_repo import BudgetRepository, BudgetItemRepository
-from api.models import Transaction, TransactionType, Category
+from api.models import Transaction, TransactionType, Category, BudgetItem
 from api.schemas.budget import BudgetCreate, BudgetUpdate, BudgetResponse, BudgetItemResponse, BudgetSummaryResponse
 
 
@@ -13,23 +13,38 @@ class BudgetService:
         self.item_repo = BudgetItemRepository(db)
         self.db = db
 
-    def _spent_for_category(self, user_id: int, category_id: int, year: int, month: int) -> float:
-        result = (
-            self.db.query(func.sum(Transaction.amount))
+    def _spent_per_category(self, user_id: int, year: int, month: int) -> dict:
+        """
+        Single query that returns spent amount for ALL categories at once.
+        Fixes the N+1 query problem.
+        """
+        rows = (
+            self.db.query(
+                Transaction.category_id,
+                func.sum(Transaction.amount).label("total")
+            )
             .filter(
                 Transaction.user_id == user_id,
-                Transaction.category_id == category_id,
                 Transaction.type == TransactionType.expense,
                 func.extract("year", Transaction.date) == year,
                 func.extract("month", Transaction.date) == month,
             )
-            .scalar()
+            .group_by(Transaction.category_id)
+            .all()
         )
-        return float(result or 0)
+        return {row.category_id: float(row.total) for row in rows}
 
-    def _category_name(self, category_id: int) -> str:
-        cat = self.db.query(Category).filter(Category.id == category_id).first()
-        return cat.name if cat else "Uncategorised"
+    def _category_names(self, category_ids: list) -> dict:
+        """
+        Single query that fetches ALL category names at once.
+        Fixes the N+1 query problem.
+        """
+        rows = (
+            self.db.query(Category.id, Category.name)
+            .filter(Category.id.in_(category_ids))
+            .all()
+        )
+        return {row.id: row.name for row in rows}
 
     def get_current(self, user_id: int) -> BudgetResponse:
         now = datetime.utcnow()
@@ -45,11 +60,6 @@ class BudgetService:
         return self._build_response(user_id, budget)
 
     def get_summary(self, user_id: int) -> BudgetSummaryResponse:
-        """
-        Always returns budget summary for the current month.
-        If no budget is set, returns zeros — never 404.
-        Safe to call on page load for new users.
-        """
         now = datetime.utcnow()
         budget = self.budget_repo.get_by_month(user_id, now.year, now.month)
 
@@ -114,14 +124,18 @@ class BudgetService:
         return self.item_repo.upsert(budget.id, category_id, limit)
 
     def _build_response(self, user_id: int, budget) -> BudgetResponse:
+        category_ids = [item.category_id for item in budget.items]
+
+        # Two queries total instead of 2N queries
+        spent_map = self._spent_per_category(user_id, budget.year, budget.month)
+        name_map = self._category_names(category_ids)
+
         item_responses = []
         total_budget = 0.0
         total_spent = 0.0
 
         for item in budget.items:
-            spent = self._spent_for_category(
-                user_id, item.category_id, budget.year, budget.month
-            )
+            spent = spent_map.get(item.category_id, 0.0)
             limit = float(item.limit)
             remaining = limit - spent
             percent_used = round((spent / limit) * 100, 1) if limit > 0 else 0.0
@@ -131,7 +145,7 @@ class BudgetService:
             item_responses.append(BudgetItemResponse(
                 id=item.id,
                 category_id=item.category_id,
-                category_name=self._category_name(item.category_id),
+                category_name=name_map.get(item.category_id, "Uncategorised"),
                 limit=limit,
                 spent=spent,
                 remaining=remaining,

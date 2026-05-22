@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 from api.core.database import get_db
 from api.core.dependencies import get_current_user
+from api.core.limiter import limiter
 from api.models import User
 from api.schemas.auth import (
     RegisterRequest, RefreshRequest,
@@ -13,7 +12,6 @@ from api.schemas.auth import (
 from api.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
@@ -53,7 +51,9 @@ def enable_2fa(
 
 
 @router.post("/2fa/verify", status_code=200)
+@limiter.limit("5/minute")
 def verify_2fa(
+    request: Request,
     body: Verify2FARequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
